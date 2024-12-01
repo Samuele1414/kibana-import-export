@@ -10,6 +10,32 @@ from getpass import getpass
 # Setup basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+
+def parse_nonstandard_json(file_path):
+    documents = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+        json_objects = content.splitlines()
+        for obj in json_objects:
+            if obj.strip():
+                try:
+                    documents.append(json.loads(obj))
+                except json.JSONDecodeError as e:
+                    print(f"Error during parsing: {e}\Object: {obj}")
+    return documents
+
+def parse_and_save_documents(input_file, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    documents = parse_nonstandard_json(input_file)
+
+    for i, doc in enumerate(documents):
+        title = doc.get('attributes', {}).get('title', f'document_{i + 1}')
+        sanitized_title = title.replace(' ', '_').replace('/', '_')
+        output_file = os.path.join(output_dir, f'{sanitized_title}.json')
+        with open(output_file, 'w', encoding='utf-8') as f_out:
+            json.dump(doc, f_out, indent=4, ensure_ascii=False)
+        print(f"Document saved: {output_file}")
+
 def get_spaces(session, url):
     """Retrieve all spaces."""
     response = session.get(f"{url}/api/spaces/space")
@@ -35,7 +61,7 @@ def export_objects(session, url, export_dir, space, object_types):
         logging.error(f"Failed to export objects for space {space_id}: {e}")
         logging.error(f"Response was: {response.text}")
         return
-    file_path = os.path.join(export_dir, f"{space_id}.ndjson")
+    file_path = os.path.join(export_dir, f"{space_id}.json")
     with open(file_path, 'wb') as file:
         file.write(response.content)
     logging.info(f"Export successful for space {space_id}: {file_path}")
@@ -65,6 +91,7 @@ def main():
 
     password = getpass("Enter your password: ")
     session = requests.Session()
+    session.verify = False
     session.auth = (args.username, password)
     session.headers.update({'kbn-xsrf': 'true'})
 
@@ -75,11 +102,16 @@ def main():
 
     # Validate the specified spaces and types before proceeding
     validate_spaces(args.spaces, all_spaces)
-
     spaces_to_export = all_spaces if not args.spaces else [space for space in all_spaces if space['id'] in args.spaces]
     export_space_details(spaces_to_export, args.export_dir)
     for space in spaces_to_export:
+        output_dir = 'output'
         export_objects(session, args.kibana_url, args.export_dir, space, args.types)
+        input_file = 'export/'+space["id"]+'.json' 
+        output_dir = output_dir+'_'+space["id"]
+        parse_and_save_documents(input_file, output_dir)
 
+
+    
 if __name__ == "__main__":
     main()
